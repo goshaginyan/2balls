@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Дуэль шариков — 2 игрока</title>
+  <style>
+    :root { --bg:#0b1020; --fg:#e6f0ff; --accent:#69d2ff; --accent2:#ff8a65; --table:#132347; }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 30% 20%,#0e1a3b 0%,#0b1020 60%,#070c17 100%);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden;display:flex;align-items:center;justify-content:center}
+    #wrap{display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;width:100%;height:100%;max-width:900px;max-height:100%}
+    header{padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:space-between}
+    header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:0.3px}
+    .panel{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .badge{padding:6px 10px;border:1px solid #234; border-radius:999px; font-size:12px; opacity:.9; background:#0b1530}
+    .btn{cursor:pointer;border:1px solid #355; background:#0f1f43; padding:8px 12px; border-radius:10px; font-weight:600}
+    .btn:active{transform:translateY(1px)}
+    #game{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
+    #canvas{max-width:100%;max-height:100%;display:block}
+    #overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+    .msg{background:rgba(10,16,36,.65);backdrop-filter:blur(6px); padding:14px 18px; border:1px solid #234; border-radius:14px; font-size:14px; line-height:1.4; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.35)}
+    .msg h2{margin:0 0 6px;font-size:20px}
+    footer{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:10px 16px;color:#9db3d8;border-top:1px solid #14264a}
+    .legend{display:flex;gap:18px;flex-wrap:wrap}
+    .joystick{position:absolute;width:120px;height:120px;border:2px solid #2b4b93;border-radius:50%;touch-action:none;z-index:10;}
+    .stick{position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;background:#0f2050;border:2px solid #4aa8ff;border-radius:50%;}
+    #joy1{bottom:10px;left:50%;transform:translateX(-50%);} /* нижний */
+    #joy2{top:10px;left:50%;transform:translateX(-50%);}     /* верхний */
+    .score{font-weight:800;letter-spacing:0.5px}
+    @media (max-width:900px){header h1{display:none}}
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <h1>Дуэль шариков</h1>
+      <div class="panel">
+        <span class="badge">Цель: вытолкни соперника за край круга • Победа до 5 очков</span>
+        <button class="btn" id="resetBtn" title="R">Новая игра</button>
+        <button class="btn" id="pauseBtn" title="P">Пауза</button>
+      </div>
+      <div class="panel score" id="scoreBox">Счёт: <span id="s1">0</span> — <span id="s2">0</span></div>
+    </header>
+
+    <div id="game">
+      <canvas id="canvas"></canvas>
+      <div id="overlay"></div>
+      <div id="joy1" class="joystick"><div class="stick" id="stick1"></div></div>
+      <div id="joy2" class="joystick"><div class="stick" id="stick2"></div></div>
+    </div>
+
+    <footer>
+      <div class="legend">
+        <strong>Игрок 1</strong> — нижний стик / WASD
+        <strong>Игрок 2</strong> — верхний стик / ← ↑ → ↓
+      </div>
+      <div>R — новая игра • P — пауза</div>
+    </footer>
+  </div>
+
+  <script>
+  (function(){
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const s1El = document.getElementById('s1');
+    const s2El = document.getElementById('s2');
+    const resetBtn = document.getElementById('resetBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+
+    // детект устройства
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
+
+    // размеры и центр арены
+    let W=0,H=0, cx=0, cy=0, R=0; 
+    function resize(){
+      // канвас ограничен по ширине, центрируется контейнером
+      const maxW = Math.min(window.innerWidth, 900);
+      const usableH = window.innerHeight - 140; // хедер+футер
+      const size = Math.min(maxW, usableH);     // квадратная область под арену
+      W = canvas.width  = size * devicePixelRatio;
+      H = canvas.height = size * devicePixelRatio;
+      canvas.style.width  = size + 'px';
+      canvas.style.height = size + 'px';
+      cx = W/2; cy = H/2; R = Math.min(W,H)*0.42;
+      const scale = 1/devicePixelRatio; ctx.setTransform(scale,0,0,scale,0,0);
+    }
+    window.addEventListener('resize', resize);
+
+    // клавиши (для десктопа)
+    const keys = new Set();
+    if(!isTouch){
+      const arrowKeys = ['arrowup','arrowdown','arrowleft','arrowright'];
+      window.addEventListener('keydown', (e)=>{
+        const k = e.key.toLowerCase();
+        if(arrowKeys.includes(k)) e.preventDefault();
+        keys.add(k);
+        if(k==='r') resetMatch();
+        if(k==='p') pauseToggle();
+      });
+      window.addEventListener('keyup', (e)=>{ keys.delete(e.key.toLowerCase()); });
+      document.getElementById('joy1').style.display='none';
+      document.getElementById('joy2').style.display='none';
+    }
+
+    // состояние
+    const state = {
+      running: true,
+      roundActive: false,
+      gameOver: false,
+      winScore: 5,
+      score1: 0,
+      score2: 0,
+      countdown: 0,
+      lastTs: 0
+    };
+
+    // физика
+    const friction = 0.992;
+    const thrust = isTouch ? 0.15 : 0.095;
+    const maxSpeed = 12;
+    const ballR = 22;
+
+    function makeBall(x,y,color){ return {x,y,vx:0,vy:0,r:ballR,color}; }
+    let p1, p2;
+
+    function resetMatch(){
+      state.score1 = 0; state.score2 = 0; s1El.textContent = '0'; s2El.textContent = '0';
+      state.gameOver = false;
+      resetRound();
+    }
+
+    function resetRound(){
+      const angle = Math.random()*Math.PI*2;
+      const d = R * 0.5;
+      const ox = Math.cos(angle)*d, oy = Math.sin(angle)*d;
+      p1 = makeBall(cx - ox, cy - oy, '#69d2ff');
+      p2 = makeBall(cx + ox, cy + oy, '#ff8a65');
+      state.roundActive = false;
+      startCountdown(3);
+    }
+
+    function startCountdown(n){
+      if(state.gameOver) return;
+      state.countdown = n;
+      overlay.innerHTML = msg(`<h2>Раунд!</h2><div>Старт через <b>${n}</b></div>`);
+      const tick = ()=>{
+        if(!state.running || state.gameOver) return;
+        if(--state.countdown>0){
+          overlay.innerHTML = msg(`<h2>Раунд!</h2><div>Старт через <b>${state.countdown}</b></div>`);
+          setTimeout(tick, 1000);
+        } else {
+          overlay.innerHTML = '';
+          state.roundActive = true;
+        }
+      };
+      setTimeout(tick, 1000);
+    }
+
+    function msg(html){ return `<div class="msg">${html}</div>`; }
+
+    function applyControls(){
+      if(!state.roundActive || state.gameOver) return;
+      if(isTouch){
+        applyJoystick(joy1State, p1);
+        applyJoystick(joy2State, p2);
+      } else {
+        if(keys.has('w')) p1.vy -= thrust;
+        if(keys.has('s')) p1.vy += thrust;
+        if(keys.has('a')) p1.vx -= thrust;
+        if(keys.has('d')) p1.vx += thrust;
+        if(keys.has('arrowup')) p2.vy -= thrust;
+        if(keys.has('arrowdown')) p2.vy += thrust;
+        if(keys.has('arrowleft')) p2.vx -= thrust;
+        if(keys.has('arrowright')) p2.vx += thrust;
+      }
+      clamp(p1); clamp(p2);
+    }
+
+    function clamp(b){
+      const sp = Math.hypot(b.vx,b.vy);
+      if(sp>maxSpeed){ b.vx*=maxSpeed/sp; b.vy*=maxSpeed/sp; }
+    }
+
+    function step(dt){
+      applyControls();
+      [p1,p2].forEach(b=>{
+        b.x += b.vx;
+        b.y += b.vy;
+        b.vx *= friction;
+        b.vy *= friction;
+      });
+      const dx = p2.x - p1.x; const dy = p2.y - p1.y; let dist = Math.hypot(dx,dy);
+      const minDist = p1.r + p2.r;
+      if(dist>0 && dist < minDist){
+        const nx = dx/dist, ny = dy/dist;
+        const overlap = minDist - dist;
+        p1.x -= nx*overlap/2; p1.y -= ny*overlap/2;
+        p2.x += nx*overlap/2; p2.y += ny*overlap/2;
+        const p1n = p1.vx*nx + p1.vy*ny;
+        const p2n = p2.vx*nx + p2.vy*ny;
+        const p1vxn = p1.vx - p1n*nx, p1vyn = p1.vy - p1n*ny;
+        const p2vxn = p2.vx - p2n*nx, p2vyn = p2.vy - p2n*ny;
+        p1.vx = p1vxn + p2n*nx; p1.vy = p1vyn + p2n*ny;
+        p2.vx = p2vxn + p1n*nx; p2.vy = p2vyn + p1n*ny;
+        p1.vx *= 1.02; p1.vy *= 1.02; p2.vx *= 1.02; p2.vy *= 1.02;
+      }
+      const out1 = Math.hypot(p1.x - cx, p1.y - cy) > (R - p1.r);
+      const out2 = Math.hypot(p2.x - cx, p2.y - cy) > (R - p2.r);
+      if(state.roundActive && (out1 || out2)){
+        state.roundActive = false;
+        if(out1 && !out2){ state.score2++; s2El.textContent = state.score2; roundEnd(2); }
+        else if(out2 && !out1){ state.score1++; s1El.textContent = state.score1; roundEnd(1); }
+        else { overlay.innerHTML = msg('<h2>Ничья</h2><div>Рестарт…</div>'); setTimeout(()=>{ if(state.running && !state.gameOver) resetRound(); }, 1200); }
+      }
+    }
+
+    function roundEnd(winner){
+      if(state.score1 >= state.winScore || state.score2 >= state.winScore){
+        state.gameOver = true;
+        overlay.innerHTML = msg(`<h2>Игра! Победил Игрок ${state.score1>state.score2?1:2}</h2><div>Нажми <b>R</b></div>`);
+        return;
+      }
+      overlay.innerHTML = msg(`<h2>Очко игроку ${winner}</h2>`);
+      setTimeout(()=>{ if(state.running && !state.gameOver) resetRound(); }, 1200);
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const g = ctx.createRadialGradient(cx, cy, R*0.2, cx, cy, R);
+      g.addColorStop(0, '#1a2f63');
+      g.addColorStop(1, '#0b1737');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#4aa8ff55'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+      ctx.strokeStyle = '#2c4f9a88'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2); ctx.stroke();
+      drawBall(p1); drawBall(p2);
+    }
+
+    function drawBall(b){
+      ctx.save();
+      ctx.shadowColor = b.color + '88';
+      ctx.shadowBlur = 18; ctx.shadowOffsetY = 2;
+      const grad = ctx.createRadialGradient(b.x-b.r*0.4, b.y-b.r*0.4, 4, b.x, b.y, b.r);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.15, b.color);
+      grad.addColorStop(1, '#0c1327');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+      const sp = Math.min(1, Math.hypot(b.vx,b.vy)/maxSpeed);
+      ctx.strokeStyle = '#ffffff44'; ctx.lineWidth = 2 + sp*3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r+3, 0, Math.PI*2); ctx.stroke();
+    }
+
+    function loop(ts){
+      if(!state.lastTs) state.lastTs = ts;
+      const dt = Math.min(32, ts - state.lastTs); state.lastTs = ts;
+      if(state.running){ step(dt); draw(); }
+      requestAnimationFrame(loop);
+    }
+
+    function pauseToggle(){
+      state.running = !state.running;
+      pauseBtn.textContent = state.running ? 'Пауза' : 'Продолжить';
+      overlay.innerHTML = state.running ? '' : msg('<h2>Пауза</h2>');
+    }
+
+    resetBtn.addEventListener('click', ()=>{ resetMatch(); });
+    pauseBtn.addEventListener('click', pauseToggle);
+
+    // === Джойстики с мультитачем ===
+    function createJoystick(stickEl){
+      let js = {dx:0,dy:0,active:false,id:null};
+      const joy = stickEl.parentElement;
+      const getRect = ()=> joy.getBoundingClientRect();
+
+      function moveTouchUsing(t){
+        const r = getRect();
+        const cx = r.left + r.width/2;
+        const cy = r.top + r.height/2;
+        let dx = t.clientX - cx;
+        let dy = t.clientY - cy;
+        const dist = Math.hypot(dx,dy);
+        const max = r.width/2;
+        if(dist>max){ dx*=max/dist; dy*=max/dist; }
+        stickEl.style.transform = `translate(${dx}px,${dy}px)`;
+        js.dx = dx/max; js.dy = dy/max;
+      }
+      function end(){ js.active=false; js.id=null; js.dx=0; js.dy=0; stickEl.style.transform=''; }
+
+      joy.addEventListener('touchstart', (e)=>{
+        e.preventDefault();
+        if(js.active) return; // уже занят этим пальцем
+        const t = e.changedTouches[0];
+        js.active = true; js.id = t.identifier; moveTouchUsing(t);
+      }, {passive:false});
+
+      joy.addEventListener('touchmove', (e)=>{
+        if(!js.active) return;
+        for(const t of e.changedTouches){ if(t.identifier===js.id){ e.preventDefault(); moveTouchUsing(t); break; } }
+      }, {passive:false});
+
+      const endHandler = (e)=>{
+        if(!js.active) return;
+        for(const t of e.changedTouches){ if(t.identifier===js.id){ e.preventDefault(); end(); break; } }
+      };
+      joy.addEventListener('touchend', endHandler, {passive:false});
+      joy.addEventListener('touchcancel', endHandler, {passive:false});
+
+      return js;
+    }
+
+    const joy1State = createJoystick(document.getElementById('stick1'));
+    const joy2State = createJoystick(document.getElementById('stick2'));
+
+    function applyJoystick(j, player){
+      player.vx += j.dx * thrust;
+      player.vy += j.dy * thrust;
+    }
+
+    // старт
+    resize();
+    resetMatch();
+    requestAnimationFrame(loop);
+  })();
+  </script>
+</body>
+</html>
