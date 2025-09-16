@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Обратный отсчёт до даты выхода</title>
+  <title>Обратный отсчёт до свободы</title>
   <style>
     :root{
       --bg:#0b1020;--bg2:#0f1a3a;--fg:#e6f0ff;--muted:#a9b7d6;--accent:#69d2ff;--accent2:#ff8a65;--card:#111a34;--good:#2ecc71;--bad:#ff5c6c;--ring:#2e3b66
@@ -80,7 +80,7 @@
   <div class="app">
     <div class="card" id="card">
       <header>
-        <h1>Обратный отсчёт до даты выхода</h1>
+        <h1>Обратный отсчёт до свободы</h1>
         <span class="badge" id="tz"></span>
       </header>
 
