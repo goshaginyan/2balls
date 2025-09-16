@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Обратный отсчёт до даты выхода</title>
+  <style>
+    :root{
+      --bg:#0b1020;--bg2:#0f1a3a;--fg:#e6f0ff;--muted:#a9b7d6;--accent:#69d2ff;--accent2:#ff8a65;--card:#111a34;--good:#2ecc71;--bad:#ff5c6c;--ring:#2e3b66
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif; color:var(--fg);
+      background: radial-gradient(1200px 600px at 20% 0%, var(--bg2) 0%, var(--bg) 55%, #070c17 100%);
+      display:grid; place-items:center; padding:24px;
+    }
+    .app{width:min(920px,100%);}
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border:1px solid var(--ring); border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,.35);
+      overflow:hidden
+    }
+    header{display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 24px; border-bottom:1px solid var(--ring)}
+    header h1{font-size:18px; margin:0; letter-spacing:.3px; font-weight:700}
+    header .badge{font-size:12px; color:var(--muted)}
+
+    .content{display:grid; grid-template-columns:1fr; gap:20px; padding:24px}
+    .controls{display:grid; grid-template-columns:1fr; gap:16px}
+    .row{display:grid; grid-template-columns:1fr; gap:12px}
+    @media (min-width:720px){
+      .controls{grid-template-columns:2fr 1fr; align-items:end}
+      .row{grid-template-columns:1fr 1fr 1fr}
+    }
+
+    label{font-size:12px; color:var(--muted); margin-bottom:6px; display:block}
+    input[type="datetime-local"], input[type="text"]{
+      width:100%; padding:14px 14px; border-radius:12px; outline:none; color:var(--fg);
+      background:#0e1731; border:1px solid var(--ring); transition:border-color .2s, box-shadow .2s;
+    }
+    input::placeholder{color:#6f7ba3}
+    input:focus{border-color:var(--accent); box-shadow:0 0 0 4px rgba(105,210,255,.15)}
+
+    .btns{display:flex; gap:10px; flex-wrap:wrap}
+    button{
+      appearance:none; border:none; padding:12px 16px; border-radius:12px; cursor:pointer; font-weight:600; letter-spacing:.3px;
+      background:linear-gradient(180deg, var(--accent), #46bde9); color:#031320; border:1px solid rgba(255,255,255,.25);
+      box-shadow:0 10px 24px rgba(105,210,255,.25);
+    }
+    button.secondary{background:#172347; color:var(--fg); box-shadow:0 8px 18px rgba(0,0,0,.25)}
+    button.danger{background:linear-gradient(180deg, var(--bad), #ff3b57); color:white}
+
+    .countdown{
+      display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; margin-top:6px
+    }
+    .tile{
+      background:#0e1731; border:1px solid var(--ring); border-radius:14px; padding:16px; text-align:center
+    }
+    .num{font-size:clamp(28px,8vw,48px); font-weight:800; line-height:1}
+    .label{margin-top:6px; font-size:12px; color:var(--muted)}
+
+    .progress{height:10px; background:#0e1731; border:1px solid var(--ring); border-radius:999px; overflow:hidden}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg, var(--accent2), var(--accent)); transition:width .25s ease}
+
+    .target{color:var(--muted); font-size:14px}
+    .target b{color:var(--fg)}
+
+    .ring{position:relative; border:2px dashed rgba(255,255,255,.15); border-radius:18px; padding:16px}
+    .ring::before{content:""; position:absolute; inset:0; border-radius:18px; box-shadow:inset 0 0 60px rgba(105,210,255,.08); pointer-events:none}
+
+    .footer{padding:14px 24px; border-top:1px solid var(--ring); display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:12px}
+
+    .winner{font-size:clamp(22px,6vw,32px); color:var(--good); font-weight:800; letter-spacing:.4px}
+    .hidden{display:none}
+
+    .outline{outline:2px solid #ff2d55; border-radius:18px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card" id="card">
+      <header>
+        <h1>Обратный отсчёт до даты выхода</h1>
+        <span class="badge" id="tz"></span>
+      </header>
+
+      <div class="content">
+        <div class="controls">
+          <div>
+            <label for="deadline">Дата и время последнего рабочего дня</label>
+            <input id="deadline" type="datetime-local" />
+          </div>
+          <div class="btns">
+            <button id="startBtn">Запустить</button>
+            <button class="secondary" id="copyLinkBtn">Поделиться ссылкой</button>
+            <button class="danger" id="resetBtn">Сброс</button>
+          </div>
+        </div>
+
+        <div class="ring" id="ring">
+          <div class="countdown" aria-live="polite">
+            <div class="tile"><div class="num" id="days">0</div><div class="label">дней</div></div>
+            <div class="tile"><div class="num" id="hours">0</div><div class="label">часов</div></div>
+            <div class="tile"><div class="num" id="mins">0</div><div class="label">минут</div></div>
+            <div class="tile"><div class="num" id="secs">0</div><div class="label">секунд</div></div>
+          </div>
+          <p class="target" id="targetText">Цель не выбрана</p>
+          <div class="progress" title="Прогресс">
+            <div class="bar" id="bar"></div>
+          </div>
+          <p class="winner hidden" id="doneText">🎉 Поздравляю! День выхода наступил.</p>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span>Локально, без серверов. Дата сохраняется в браузере.</span>
+        <span>⌛ Обновление каждые 250 мс</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const input = document.getElementById('deadline');
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const copyBtn = document.getElementById('copyLinkBtn');
+
+    const daysEl = document.getElementById('days');
+    const hoursEl = document.getElementById('hours');
+    const minsEl = document.getElementById('mins');
+    const secsEl = document.getElementById('secs');
+
+    const targetText = document.getElementById('targetText');
+    const doneText = document.getElementById('doneText');
+    const bar = document.getElementById('bar');
+    const tz = document.getElementById('tz');
+    const card = document.getElementById('card');
+
+    let target = null; // Date
+    let startedAt = null; // Date when countdown started (for progress)
+    let timer = null;
+
+    tz.textContent = new Intl.DateTimeFormat(undefined, { timeZoneName:'longOffset' }).format(new Date()).split('\u200e').join('');
+
+    function save(){
+      if(!target){ localStorage.removeItem('countdown_target'); localStorage.removeItem('countdown_started'); return; }
+      localStorage.setItem('countdown_target', target.toISOString());
+      localStorage.setItem('countdown_started', (startedAt||new Date()).toISOString());
+    }
+    function load(){
+      const url = new URL(location.href);
+      const until = url.searchParams.get('until');
+      const lsTarget = localStorage.getItem('countdown_target');
+      const lsStarted = localStorage.getItem('countdown_started');
+      if(until){
+        const t = new Date(until);
+        if(!isNaN(t)){
+          target = t; startedAt = new Date(); input.value = toLocalInputValue(t); return true;
+        }
+      }
+      if(lsTarget){
+        const t = new Date(lsTarget); const s = lsStarted ? new Date(lsStarted) : new Date();
+        if(!isNaN(t)) { target = t; startedAt = s; input.value = toLocalInputValue(t); return true; }
+      }
+      return false;
+    }
+
+    function toLocalInputValue(date){
+      // Convert Date -> yyyy-MM-ddTHH:mm for datetime-local in local tz
+      const pad=n=>String(n).padStart(2,'0');
+      const d = new Date(date);
+      const y = d.getFullYear();
+      const m = pad(d.getMonth()+1);
+      const dd = pad(d.getDate());
+      const hh = pad(d.getHours());
+      const mm = pad(d.getMinutes());
+      return `${y}-${m}-${dd}T${hh}:${mm}`;
+    }
+
+    function start(){
+      const val = input.value;
+      if(!val){
+        pulseOutline();
+        return;
+      }
+      const local = new Date(val.replace(' ', 'T'));
+      if(isNaN(local)){
+        pulseOutline();
+        return;
+      }
+      target = local; // local time value
+      startedAt = new Date();
+      save();
+      renderTarget();
+      run();
+    }
+
+    function reset(){
+      target = null; startedAt = null;
+      save();
+      input.value = '';
+      clearInterval(timer); timer=null;
+      daysEl.textContent = hoursEl.textContent = minsEl.textContent = secsEl.textContent = '0';
+      bar.style.width = '0%';
+      targetText.textContent = 'Цель не выбрана';
+      doneText.classList.add('hidden');
+    }
+
+    function renderTarget(){
+      if(!target){ targetText.textContent='Цель не выбрана'; return; }
+      const dtf = new Intl.DateTimeFormat(undefined, {
+        dateStyle:'full', timeStyle:'short'
+      });
+      targetText.innerHTML = `До <b>${dtf.format(target)}</b>`;
+    }
+
+    function run(){
+      if(timer) clearInterval(timer);
+      tick();
+      timer = setInterval(tick, 250);
+    }
+
+    function tick(){
+      if(!target){ return; }
+      const now = new Date();
+      let diff = target - now;
+      if(diff <= 0){
+        daysEl.textContent = hoursEl.textContent = minsEl.textContent = secsEl.textContent = '0';
+        doneText.classList.remove('hidden');
+        bar.style.width = '100%';
+        confetti();
+        clearInterval(timer); timer=null; return;
+      }
+      doneText.classList.add('hidden');
+      const sec = Math.floor(diff/1000);
+      const days = Math.floor(sec / 86400);
+      const hours = Math.floor((sec % 86400) / 3600);
+      const mins = Math.floor((sec % 3600) / 60);
+      const secs = sec % 60;
+      daysEl.textContent = days;
+      hoursEl.textContent = hours;
+      minsEl.textContent = mins;
+      secsEl.textContent = secs;
+
+      // progress relative to startedAt -> target
+      if(startedAt && target>startedAt){
+        const total = target - startedAt;
+        const passed = now - startedAt;
+        const p = Math.min(100, Math.max(0, (passed/total)*100));
+        bar.style.width = p + '%';
+      }
+    }
+
+    function pulseOutline(){
+      const ring = document.getElementById('ring');
+      ring.classList.add('outline');
+      setTimeout(()=> ring.classList.remove('outline'), 500);
+    }
+
+    startBtn.addEventListener('click', start);
+    resetBtn.addEventListener('click', reset);
+
+    copyBtn.addEventListener('click', async () => {
+      if(!target){ pulseOutline(); return; }
+      const url = new URL(location.href);
+      url.searchParams.set('until', target.toISOString());
+      try{
+        await navigator.clipboard.writeText(url.toString());
+        copyBtn.textContent = 'Ссылка скопирована ✓';
+        setTimeout(()=> copyBtn.textContent = 'Поделиться ссылкой', 1600);
+      }catch(e){
+        alert('Скопируйте ссылку вручную:\n' + url.toString());
+      }
+    });
+
+    // simple confetti
+    function confetti(){
+      const n = 120; const frag = document.createDocumentFragment();
+      for(let i=0;i<n;i++){
+        const s = document.createElement('i');
+        const size = Math.random()*8+4;
+        s.style.position='fixed';
+        s.style.left = (Math.random()*100)+'vw';
+        s.style.top = '-20px';
+        s.style.width = size+'px'; s.style.height=size+'px';
+        s.style.background = `hsl(${Math.random()*360}, 90%, 60%)`;
+        s.style.opacity = .9;
+        s.style.transform = `rotate(${Math.random()*360}deg)`;
+        s.style.borderRadius = Math.random()>.5?'3px':'50%';
+        s.style.transition = 'transform 3s linear, top 3s ease-out, left 3s linear, opacity 3.2s';
+        frag.appendChild(s);
+        requestAnimationFrame(()=>{
+          s.style.top = '110vh';
+          s.style.left = `calc(${s.style.left} + ${(Math.random()*40-20)}vw)`;
+          s.style.transform = `rotate(${Math.random()*1080}deg)`;
+          s.style.opacity = 0;
+        });
+        setTimeout(()=> s.remove(), 3500);
+      }
+      document.body.appendChild(frag);
+    }
+
+    // init
+    (function init(){
+      if(load()){
+        renderTarget();
+        run();
+      }
+    })();
+  </script>
+</body>
+</html>
