@@ -7,25 +7,25 @@
   <style>
     :root { --bg:#0b1020; --fg:#e6f0ff; --accent:#69d2ff; --accent2:#ff8a65; --table:#132347; }
     *{box-sizing:border-box}
-    html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 30% 20%,#0e1a3b 0%,#0b1020 60%,#070c17 100%);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
-    #wrap{display:grid;grid-template-rows:auto 1fr auto;min-height:100%}
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 30% 20%,#0e1a3b 0%,#0b1020 60%,#070c17 100%);color:var(--fg);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden;display:flex;align-items:center;justify-content:center}
+    #wrap{display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;width:100%;height:100%;max-width:900px;max-height:100%}
     header{padding:10px 16px;display:flex;gap:12px;align-items:center;justify-content:space-between}
     header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:0.3px}
     .panel{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .badge{padding:6px 10px;border:1px solid #234; border-radius:999px; font-size:12px; opacity:.9; background:#0b1530}
     .btn{cursor:pointer;border:1px solid #355; background:#0f1f43; padding:8px 12px; border-radius:10px; font-weight:600}
     .btn:active{transform:translateY(1px)}
-    #game{position:relative;display:grid;place-items:center;flex:1}
-    #canvas{width:100%;height:100%;display:block}
+    #game{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
+    #canvas{max-width:100%;max-height:100%;display:block}
     #overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
     .msg{background:rgba(10,16,36,.65);backdrop-filter:blur(6px); padding:14px 18px; border:1px solid #234; border-radius:14px; font-size:14px; line-height:1.4; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,.35)}
     .msg h2{margin:0 0 6px;font-size:20px}
     footer{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:10px 16px;color:#9db3d8;border-top:1px solid #14264a}
     .legend{display:flex;gap:18px;flex-wrap:wrap}
-    .joystick{position:absolute;width:120px;height:120px;border:2px solid #2b4b93;border-radius:50%;touch-action:none;}
+    .joystick{position:absolute;width:120px;height:120px;border:2px solid #2b4b93;border-radius:50%;touch-action:none;z-index:10;}
     .stick{position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;background:#0f2050;border:2px solid #4aa8ff;border-radius:50%;}
-    #joy1{bottom:10px;left:50%;transform:translateX(-50%);}
-    #joy2{top:10px;left:50%;transform:translateX(-50%);}
+    #joy1{bottom:10px;left:50%;transform:translateX(-50%);} /* нижний */
+    #joy2{top:10px;left:50%;transform:translateX(-50%);}     /* верхний */
     .score{font-weight:800;letter-spacing:0.5px}
     @media (max-width:900px){header h1{display:none}}
   </style>
@@ -51,8 +51,8 @@
 
     <footer>
       <div class="legend">
-        <strong>Игрок 1</strong> — нижний стик
-        <strong>Игрок 2</strong> — верхний стик
+        <strong>Игрок 1</strong> — нижний стик / WASD
+        <strong>Игрок 2</strong> — верхний стик / ← ↑ → ↓
       </div>
       <div>R — новая игра • P — пауза</div>
     </footer>
@@ -68,19 +68,42 @@
     const resetBtn = document.getElementById('resetBtn');
     const pauseBtn = document.getElementById('pauseBtn');
 
+    // детект устройства
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0 || navigator.msMaxTouchPoints>0;
+
+    // размеры и центр арены
     let W=0,H=0, cx=0, cy=0, R=0; 
     function resize(){
-      W = canvas.width = window.innerWidth * devicePixelRatio;
-      H = canvas.height = (window.innerHeight - 120) * devicePixelRatio;
-      canvas.style.height = (H/devicePixelRatio)+"px";
-      canvas.style.width = (W/devicePixelRatio)+"px";
+      // канвас ограничен по ширине, центрируется контейнером
+      const maxW = Math.min(window.innerWidth, 900);
+      const usableH = window.innerHeight - 140; // хедер+футер
+      const size = Math.min(maxW, usableH);     // квадратная область под арену
+      W = canvas.width  = size * devicePixelRatio;
+      H = canvas.height = size * devicePixelRatio;
+      canvas.style.width  = size + 'px';
+      canvas.style.height = size + 'px';
       cx = W/2; cy = H/2; R = Math.min(W,H)*0.42;
       const scale = 1/devicePixelRatio; ctx.setTransform(scale,0,0,scale,0,0);
     }
     window.addEventListener('resize', resize);
 
+    // клавиши (для десктопа)
     const keys = new Set();
+    if(!isTouch){
+      const arrowKeys = ['arrowup','arrowdown','arrowleft','arrowright'];
+      window.addEventListener('keydown', (e)=>{
+        const k = e.key.toLowerCase();
+        if(arrowKeys.includes(k)) e.preventDefault();
+        keys.add(k);
+        if(k==='r') resetMatch();
+        if(k==='p') pauseToggle();
+      });
+      window.addEventListener('keyup', (e)=>{ keys.delete(e.key.toLowerCase()); });
+      document.getElementById('joy1').style.display='none';
+      document.getElementById('joy2').style.display='none';
+    }
 
+    // состояние
     const state = {
       running: true,
       roundActive: false,
@@ -92,8 +115,9 @@
       lastTs: 0
     };
 
+    // физика
     const friction = 0.992;
-    const thrust = 0.15;
+    const thrust = isTouch ? 0.15 : 0.095;
     const maxSpeed = 12;
     const ballR = 22;
 
@@ -137,8 +161,19 @@
 
     function applyControls(){
       if(!state.roundActive || state.gameOver) return;
-      applyJoystick(joy1State, p1);
-      applyJoystick(joy2State, p2);
+      if(isTouch){
+        applyJoystick(joy1State, p1);
+        applyJoystick(joy2State, p2);
+      } else {
+        if(keys.has('w')) p1.vy -= thrust;
+        if(keys.has('s')) p1.vy += thrust;
+        if(keys.has('a')) p1.vx -= thrust;
+        if(keys.has('d')) p1.vx += thrust;
+        if(keys.has('arrowup')) p2.vy -= thrust;
+        if(keys.has('arrowdown')) p2.vy += thrust;
+        if(keys.has('arrowleft')) p2.vx -= thrust;
+        if(keys.has('arrowright')) p2.vx += thrust;
+      }
       clamp(p1); clamp(p2);
     }
 
@@ -232,21 +267,15 @@
 
     resetBtn.addEventListener('click', ()=>{ resetMatch(); });
     pauseBtn.addEventListener('click', pauseToggle);
-    window.addEventListener('keydown', (e)=>{
-      if(e.key.toLowerCase()==='r'){ resetMatch(); }
-      if(e.key.toLowerCase()==='p'){ pauseToggle(); }
-    });
 
-    // Joystick logic
+    // === Джойстики с мультитачем ===
     function createJoystick(stickEl){
-      let state = {dx:0,dy:0,active:false};
+      let js = {dx:0,dy:0,active:false,id:null};
       const joy = stickEl.parentElement;
-      const rect = ()=> joy.getBoundingClientRect();
+      const getRect = ()=> joy.getBoundingClientRect();
 
-      function move(e){
-        if(!state.active) return;
-        const t = (e.touches? e.touches[0]: e);
-        const r = rect();
+      function moveTouchUsing(t){
+        const r = getRect();
         const cx = r.left + r.width/2;
         const cy = r.top + r.height/2;
         let dx = t.clientX - cx;
@@ -255,27 +284,41 @@
         const max = r.width/2;
         if(dist>max){ dx*=max/dist; dy*=max/dist; }
         stickEl.style.transform = `translate(${dx}px,${dy}px)`;
-        state.dx = dx/max; state.dy = dy/max;
+        js.dx = dx/max; js.dy = dy/max;
       }
-      function end(){
-        state.active=false; state.dx=0; state.dy=0; stickEl.style.transform='';
-      }
-      joy.addEventListener('touchstart', e=>{state.active=true;move(e)});
-      joy.addEventListener('touchmove', move);
-      joy.addEventListener('touchend', end);
-      joy.addEventListener('touchcancel', end);
-      return state;
+      function end(){ js.active=false; js.id=null; js.dx=0; js.dy=0; stickEl.style.transform=''; }
+
+      joy.addEventListener('touchstart', (e)=>{
+        e.preventDefault();
+        if(js.active) return; // уже занят этим пальцем
+        const t = e.changedTouches[0];
+        js.active = true; js.id = t.identifier; moveTouchUsing(t);
+      }, {passive:false});
+
+      joy.addEventListener('touchmove', (e)=>{
+        if(!js.active) return;
+        for(const t of e.changedTouches){ if(t.identifier===js.id){ e.preventDefault(); moveTouchUsing(t); break; } }
+      }, {passive:false});
+
+      const endHandler = (e)=>{
+        if(!js.active) return;
+        for(const t of e.changedTouches){ if(t.identifier===js.id){ e.preventDefault(); end(); break; } }
+      };
+      joy.addEventListener('touchend', endHandler, {passive:false});
+      joy.addEventListener('touchcancel', endHandler, {passive:false});
+
+      return js;
     }
 
     const joy1State = createJoystick(document.getElementById('stick1'));
     const joy2State = createJoystick(document.getElementById('stick2'));
 
     function applyJoystick(j, player){
-      if(!j) return;
       player.vx += j.dx * thrust;
       player.vy += j.dy * thrust;
     }
 
+    // старт
     resize();
     resetMatch();
     requestAnimationFrame(loop);
