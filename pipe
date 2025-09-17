@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Conveyor Swipe</title>
+<style>
+  :root{
+    --bg:#12171f;           /* тёмный фон-сетка */
+    --grid:#1b2431;
+    --belt-top:#e8edf3;     /* верхний конвейер (серый) */
+    --belt-left:#6fb6ff;    /* синий */
+    --belt-right:#ff98a0;   /* красный-пастель */
+    --belt-bottom:#79e0b2;  /* зелёный */
+    --guard:#f7d400;        /* жёлтая опасная зона */
+    --guard2:#1a1a1a;
+    --ui:#ffb34c;           /* акценты */
+    --blue:#2a7be9;
+    --red:#d94141;
+    --green:#27b06e;
+    --orange:#f4a62a;
+    --boxEdge:#0a0f1a;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial}
+  #wrap{height:100%;display:grid;place-items:center}
+  canvas{width:min(100vw,720px);height:calc(min(100vw,720px)*1.6);max-height:100vh;display:block;touch-action:none}
+  .hud{
+    position:fixed;inset:auto 0 0 0;display:flex;gap:12px;justify-content:center;padding:8px 12px;
+    color:#e6f0ff;font-weight:700;text-shadow:0 1px 0 #0008;background:linear-gradient(180deg,transparent, #0006 40%, #000a)
+  }
+  .chip{background:#0009;border:1px solid #ffffff22;border-radius:10px;padding:6px 10px}
+  .dir{min-width:88px;text-align:center}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game" width="450" height="720"></canvas></div>
+<div class="hud">
+  <div class="chip">Очки: <span id="score">0</span></div>
+  <div class="chip">Жизни: <span id="lives">3</span></div>
+  <div class="chip dir">Направление: <span id="dir">прямо</span></div>
+</div>
+
+<script>
+(() => {
+  const cvs = document.getElementById('game');
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+
+  // Геометрия «как на скрине»
+  const laneW = 110;                 // ширина центральной шахты
+  const crossY = H*0.62;             // центр перекрёстка
+  const leftX = W*0.25;
+  const rightX = W*0.75;
+  const midX = W*0.5;
+
+  // HUD
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const dirEl = document.getElementById('dir');
+
+  // Состояние
+  let boxes = [];
+  let lastSpawn = 0;
+  let score = 0;
+  let lives = 3;
+  let speed = 150; // px/s
+  const colors = [
+    {name:'blue',  fill:getVar('--blue')  , goal:'left'},
+    {name:'red',   fill:getVar('--red')   , goal:'right'},
+    {name:'green', fill:getVar('--green') , goal:'down'},
+    {name:'orange',fill:getVar('--orange'), goal:['left','right','down'][Math.floor(Math.random()*3)]}
+  ];
+  // активное направление ( -1 влево, 0 прямо, 1 вправо )
+  let dir = 0;
+  let dirTimeout = 0;       // время истечения выбора направления
+  const DIR_WINDOW = 650;   // мс: на 1 коробку
+
+  // Утилиты
+  function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function rnd(a,b){ return a+Math.random()*(b-a); }
+
+  // Объект коробки
+  function spawnBox(ts){
+    const c = colors[Math.floor(Math.random()*3)]; // из B/R/G
+    boxes.push({
+      x: midX, y: -40, w: 52, h: 52, rot: rnd(-0.2,0.2),
+      vx: 0, vy: speed, color:c.fill, target:c.name,
+      phase:'down' // down -> turn -> out
+    });
+    lastSpawn = ts;
+  }
+
+  // Рендер
+  function drawBackground(){
+    // сетка
+    ctx.fillStyle = getVar('--bg');
+    ctx.fillRect(0,0,W,H);
+    const grid = getVar('--grid');
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    for(let x=0;x<W;x+=20){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for(let y=0;y<H;y+=20){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+    // конвейеры
+    // верхний (серый)
+    belt(midX - laneW/2, 0, laneW, crossY-30, getVar('--belt-top'));
+    // левый синий
+    belt(0, crossY-25, leftX+laneW/2, 50, getVar('--belt-left'));
+    // правый красный
+    belt(rightX - laneW/2, crossY-25, W-(rightX - laneW/2), 50, getVar('--belt-right'));
+    // нижний зелёный
+    belt(midX - laneW/2, crossY+25, laneW, H-(crossY+25), getVar('--belt-bottom'));
+
+    // центр/стоп-зона с шахматной рамкой
+    const cW = laneW, cH = 50;
+    ctx.fillStyle = '#e9eef4';
+    ctx.fillRect(midX-cW/2, crossY-25, cW, 50);
+
+    hazardRect(midX-cW/2, crossY-25, cW, 50);
+  }
+
+  function belt(x,y,w,h,color){
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,w,h);
+    // рисуем секции
+    ctx.fillStyle = '#ffffff33';
+    if (h > w){
+      for(let i=y;i<y+h;i+=16){ ctx.fillRect(x,i,w,8); }
+    }else{
+      for(let i=x;i<x+w;i+=16){ ctx.fillRect(i,y,8,h); }
+    }
+  }
+
+  function hazardRect(x,y,w,h){
+    const s = 10;
+    for(let i=0;i<w;i+=s){
+      ctx.fillStyle = (Math.floor(i/s)%2)?getVar('--guard'):getVar('--guard2');
+      ctx.fillRect(x+i,y, s,5);
+      ctx.fillRect(x+i,y+h-5, s,5);
+    }
+  }
+
+  function drawBox(b){
+    ctx.save();
+    ctx.translate(b.x,b.y);
+    ctx.rotate(b.rot);
+    const r = 10;
+    // тень
+    ctx.fillStyle = '#0006';
+    roundRect(-b.w/2+3, -b.h/2+5, b.w, b.h, r); ctx.fill();
+    // тело
+    ctx.fillStyle = b.color;
+    roundRect(-b.w/2, -b.h/2, b.w, b.h, r); ctx.fill();
+    // рамка
+    ctx.lineWidth = 3; ctx.strokeStyle = '#00000055'; ctx.stroke();
+    // «текстура»
+    ctx.globalAlpha = 0.25; ctx.fillStyle = '#fff';
+    for(let i=0;i<6;i++){
+      ctx.fillRect(-b.w/4 + i*6 - 8, -b.h/6 + (i%3)*8 - 8, 10,4);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  // Игровой цикл
+  let last = performance.now();
+  function tick(now){
+    const dt = Math.min(33, now-last)/1000; last = now;
+
+    // логика спавна
+    if (now - lastSpawn > 900) spawnBox(now);
+
+    // движение
+    boxes.forEach(b=>{
+      b.x += b.vx*dt; b.y += b.vy*dt;
+
+      // поворот в зоне перекрёстка
+      if (b.phase==='down' && b.y >= crossY-25){
+        // читаем текущее направление (сбрасывается через окно)
+        let chosen = dir;
+        if (performance.now() > dirTimeout) chosen = 0;
+
+        if (chosen === -1){ b.vx = -speed; b.vy = 0; b.phase='out'; }
+        else if (chosen === 1){ b.vx = speed; b.vy = 0; b.phase='out'; }
+        else { b.vx = 0; b.vy = speed; b.phase='out'; }
+      }
+    });
+
+    // проверка «финиша»
+    boxes = boxes.filter(b=>{
+      // вышла за экран — оцениваем попадание
+      if (b.x < -60 || b.x > W+60 || b.y > H+60){
+        const goal =
+          (b.x < 0) ? 'left' :
+          (b.x > W) ? 'right' :
+          'down';
+
+        const ok =
+          (goal==='left'  && b.target==='blue') ||
+          (goal==='right' && b.target==='red')  ||
+          (goal==='down'  && b.target==='green');
+
+        if (ok){ score++; scoreEl.textContent = score; }
+        else {
+          lives--; livesEl.textContent = lives;
+          if (lives<=0){ gameOver(); return false; }
+        }
+        return false;
+      }
+      return true;
+    });
+
+    // отрисовка
+    drawBackground();
+    // «ворота» направления
+    drawDirectionIndicator();
+    boxes.forEach(drawBox);
+
+    requestAnimationFrame(tick);
+  }
+
+  function gameOver(){
+    // затемнение
+    ctx.fillStyle = '#000a'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#fff'; ctx.font='bold 28px system-ui';
+    ctx.textAlign='center';
+    ctx.fillText('Игра окончена', W/2, H/2-10);
+    ctx.font='18px system-ui';
+    ctx.fillText('Нажмите для рестарта', W/2, H/2+20);
+
+    cvs.onclick = () => { // рестарт
+      score=0; lives=3; boxes=[]; speed=150;
+      scoreEl.textContent=score; livesEl.textContent=lives;
+      dir=0; setDirLabel();
+      cvs.onclick=null; last=performance.now(); requestAnimationFrame(tick);
+    };
+  }
+
+  // UI: индикатор направления в центре
+  function drawDirectionIndicator(){
+    const r = 14;
+    const y = crossY-60;
+    // три лампы
+    lamp(W*0.25, y, r, dir===-1 ? '#fff' : '#ffffff33', getVar('--belt-left'));
+    lamp(W*0.5,  y, r, dir===0  ? '#fff' : '#ffffff33', getVar('--belt-bottom'));
+    lamp(W*0.75, y, r, dir===1  ? '#fff' : '#ffffff33', getVar('--belt-right'));
+  }
+  function lamp(x,y,r,ring,fill){
+    ctx.beginPath(); ctx.arc(x,y,r+5,0,Math.PI*2); ctx.fillStyle = ring; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle = fill; ctx.fill();
+  }
+
+  function setDirLabel(){
+    dirEl.textContent = dir===-1?'лево':dir===1?'право':'прямо';
+  }
+
+  // Ввод: свайпы и клавиатура
+  let touchStartX=0, touchStartY=0, touching=false;
+  cvs.addEventListener('touchstart',e=>{
+    const t = e.changedTouches[0];
+    touchStartX=t.clientX; touchStartY=t.clientY; touching=true;
+  },{passive:true});
+  cvs.addEventListener('touchend',e=>{
+    if(!touching) return; touching=false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = Math.abs(t.clientY - touchStartY);
+    if (Math.abs(dx) > 25 && dy < 120){
+      dir = dx<0 ? -1 : 1;
+    } else {
+      dir = 0; // тап без явного свайпа — прямо
+    }
+    dirTimeout = performance.now() + DIR_WINDOW;
+    setDirLabel();
+  },{passive:true});
+
+  window.addEventListener('keydown',e=>{
+    if (e.key==='ArrowLeft'){ dir=-1; dirTimeout=performance.now()+DIR_WINDOW; setDirLabel(); }
+    else if (e.key==='ArrowRight'){ dir=1; dirTimeout=performance.now()+DIR_WINDOW; setDirLabel(); }
+    else if (e.key==='ArrowDown' || e.key===' '){ dir=0; dirTimeout=performance.now()+DIR_WINDOW; setDirLabel(); }
+  });
+
+  // старт
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
